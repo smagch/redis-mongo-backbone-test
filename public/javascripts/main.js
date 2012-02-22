@@ -19,8 +19,25 @@
   var AppView = Backbone.View.extend({
     el: '#wrapper',
     initialize: function() {
-      this.$input = $('#input');
+      //this.$input = $('#input');
       //this.collection = new ArticleCollection();
+      $('#get-text').on('click', function(e) {
+        console.log('click');
+        $.ajax({
+          type: 'GET',
+          dataType: 'json',
+          contentType: 'application/json',
+          url: '/dropbox/gettext'
+        })
+        .fail(function(e) {
+          console.log('error');
+          console.dir( e );
+        })
+        .done(function(obj) {
+          console.log('done');
+          console.dir( obj );
+        });
+      });
     },
     events: {
       //'keydown #input': 'sendText'
