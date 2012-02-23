@@ -8,6 +8,7 @@ var express = require('express')
   , _ = require('underscore')
   , EventEmitter = require('events').EventEmitter
   , util = require('util')
+  , async = require('async')
   , Schema = mongoose.Schema
   , ObjectId = Schema.ObjectId
   ;
@@ -16,7 +17,9 @@ mongoose.connect('mongodb://localhost/mydb');
 
 
 var UserSchema = new Schema({
-  name: { type: String }
+  name: { type: String },
+  editings: [ { type: ObjectId, ref: 'Project' } ]
+  //editings: [{ type: ObjectId, ref: 'Editor' }]
 });
 
 var LoginSchema = new Schema({
@@ -38,10 +41,23 @@ var DropboxSchema = new Schema({
   }
 });
 
+var ProjectSchema = new Schema({
+  title: { type: String, index: { unique : true }},
+  description: { type: String, required: true },
+  editors: [ EditorSchema ]
+});
+
+var EditorSchema = new Schema({
+  user: { type: ObjectId, ref: 'User' },
+  // shareable link
+  url: { type: String }
+});
+
 var 
   User = mongoose.model('User', UserSchema),
   Login = mongoose.model('Login', LoginSchema),
-  Dropbox = mongoose.model('Dropbox', DropboxSchema);
+  Dropbox = mongoose.model('Dropbox', DropboxSchema)
+  Project = mongoose.model('Project', ProjectSchema);
 
 
 everyauth.debug = true;
@@ -57,52 +73,6 @@ everyauth.everymodule
   });
 
 
-
-function MyEmitter() {
-  EventEmitter.call(this);
-}
-util.inherits(MyEmitter, EventEmitter);
-MyEmitter.prototype.error = function() {
-  var args = Array.prototype.slice.call(arguments);
-  this.emit('error', args);
-  this.removeAllListeners();
-}
-MyEmitter.prototype.success = function() {
-  console.log('proto success');
-  var args = Array.prototype.slice.call(arguments);
-  console.log('before emit');
-  this.emit('success', args);
-  this.removeAllListeners();
-}
-
-function createUser(data, next) {
-  var ret = this instanceof MyEmitter ? this : new MyEmitter();
-  var user = new User(data);
-  
-  user.save(function(err, doc) {
-    if(err || !doc) {
-      ret.error(err);
-    } else {
-      next.call(ret, doc);
-    }
-  });
-  return ret;
-}
-
-function createDropbox(data, next) {
-  var ret = this instanceof MyEmitter ? this : new MyEmitter();
-  var dropbox = new Dropbox(data);
-  
-  dropbox.save(function(err, doc) {
-    if(err || !doc) {
-      ret.error(err);
-    } else {
-      next.call(ret, doc);
-    }
-  });
-  return ret;
-}
-
 everyauth
   .dropbox
     .consumerKey(conf.dropbox.consumerKey)
@@ -110,33 +80,55 @@ everyauth
     .findOrCreateUser( function (sess, accessToken, accessSecret, metadata) {
       console.log('== find or create user ==');
       var 
-        promise = this.Promise(),
-        successHandler = function(user, dropbox) {
-          console.log('successHandler');
-          promise.fulfill(user);
-        };
+        promise = this.Promise();
       
       Dropbox
         .findOne({uid: metadata.uid})
         .populate('user')
-        .exec(function(err, doc) {
+        .exec(function(err0, doc0) {
           console.log('find callback');
-          if(doc) {
+          if(doc0) {
             console.log('has user');
-            successHandler(doc.user, doc);
+            promise.fulfill(doc0);
           } else {
             console.log('no user');
-            createUser({ name: metadata.display_name }, function(user) {
-              console.log('createUser callback');
-              createDropbox.call(this, _.extend({ user: user.id }, metadata), function(dropbox) {
-                console.log('create dropbox callback');
-                this.success(user, dropbox);
-              });
-            })
-            .on('error', function(e) {
-              promise.fulfill([e]);
-            })
-            .on('success', successHandler);
+            var userName = metadata.display_name + Math.random().toString(16).substr(2),
+              // fulfill user
+              user;
+            async.reduce([
+              function(name) {
+                return (user = new User({name: name}));
+              },
+              function(data) {
+                var options = _.extend({user: data._id}, metadata);
+                return new Dropbox(options);
+              }
+            ], userName,
+              function(data, func, callback) {
+                var obj = func(data);
+                console.log('getObj');
+                console.dir( obj );
+                obj.save(function(err, doc) {
+                  if(doc) {
+                    console.log('success');
+                    callback(null, doc);
+                  } else {
+                    console.log('');
+                    callback(err, 'save error');
+                  }
+                });
+              },
+              function(err, dropbox) {
+                if(err) {
+                  console.log('err!!!');
+                  console.dir( err );
+                  promise.fulfill([err])
+                } else {
+                  console.log('result!!!');
+                  promise.fulfill(user);
+                }
+              }
+            );
           }
         });
       return promise;
@@ -224,10 +216,76 @@ app.get('/account', function(req, res) {
   });
 });
 
+app.get('/project', function(req, res) {
+  res.render('project', {
+    title: 'project'
+  })
+});
+
+app.post('/project/create', validateProject, ensureFile, function(req, res) {
+
+  
+  
+  // TODO see if dropbox login
+  // client.share
+  client.put('title.json', options, function(status, reply) {
+    
+  })
+  // 1. put file and get sharable link
+  // 2. create Project
+  // 3. push User.editing
+  
+  // res.render('', {
+  //   
+  // });
+});
+
+function validateProject(req, res, next) {
+  var body = req.body,
+    title = body.title,
+    desc = body.description;
+    
+  if(!title || !desc || title.length > 20 || desc.length > 100 ) {
+    res.render('project', {
+      title: 'project',
+      // TODO more nicer msg
+      msg: 'title and description is nessesary and has limit'
+    });
+    return;
+  }
+  next();
+}
+
+function ensureFile(req, res, next) {
+  var 
+    body = req.body,
+    title = body.title,
+    desc = body.description,
+    fileName = title + '.json',
+    dropbox = req.session.auth.dropbox,
+    accessToken = dropbox.accessToken,
+    accessTokenSecret = dropbox.accessTokenSecret,
+    options = {
+      oauth_token        : accessToken,
+      oauth_token_secret : accessTokenSecret
+    };
+  
+  // client.put(fileName, _.extend({ overwrite: false}, options), function(status, reply) {
+  //   if(status == 200) {
+  //     client.share(fileName, options, function(status2, reply2) {
+  //       if(status2 == 200) {
+  //         url = reply2.url;
+  //         
+  //       }
+  //     });
+  //   }
+  // });
+}
+
 app.get('/dropbox/gettext', function(req, res) {
   console.log('get text');
   var dropbox = req.session.auth.dropbox;
-  console.dir( dropbox );
+  //console.dir( dropbox );
   
   var 
     accessToken = dropbox.accessToken,
@@ -237,11 +295,21 @@ app.get('/dropbox/gettext', function(req, res) {
     
   var options = {
     oauth_token        : accessToken,
-    oauth_token_secret : accessTokenSecret,
-    overwrite         : true,
-    root: 'sandbox'
+    oauth_token_secret : accessTokenSecret
+    //overwrite         : true,
+    //root: 'sandbox'
   };
-  
+  var filePath = 'hello.txt';
+  // Dropbox.find({}, function(err, docs) {
+  //   docs.forEach(function(doc) {
+  //     
+  //   });
+  // });
+  // client.shares(filePath, options, function(status, reply){
+  //   if(status == 200) {
+  //     
+  //   }
+  // })
   // client.put("hello.txt", "here is some text", options, function(status, reply){
   //   console.log(status)
   //   console.log(reply)
