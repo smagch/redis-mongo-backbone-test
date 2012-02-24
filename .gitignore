@@ -3,3 +3,4 @@ public/stylesheets/*.css
 *DS_Store
 data
 dump.rdb
+conf.js
