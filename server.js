@@ -44,14 +44,18 @@ var DropboxSchema = new Schema({
 var ProjectSchema = new Schema({
   title: { type: String, index: { unique : true }},
   description: { type: String, required: true },
-  editors: [ EditorSchema ]
+  //editors: [ EditorSchema ]
+  editors: [{
+    user: { type: ObjectId, ref: 'User' },
+    url: { type: String }
+  }]
 });
 
-var EditorSchema = new Schema({
-  user: { type: ObjectId, ref: 'User' },
-  // shareable link
-  url: { type: String }
-});
+// var EditorSchema = new Schema({
+//   user: { type: ObjectId, ref: 'User' },
+//   // shareable link
+//   url: { type: String }
+// });
 
 var 
   User = mongoose.model('User', UserSchema),
@@ -149,6 +153,16 @@ app.configure( function () {
   app.use(express.static(__dirname + '/public'));
 });
 
+app.configure('development', function(){
+  app.use(express.errorHandler({ dumpExceptions: true, showStack: true })); 
+});
+
+app.configure('production', function(){
+  app.use(express.errorHandler()); 
+});
+
+
+
 app.get('/', function (req, res) {
   console.log('session');
   console.dir( req.session );
@@ -156,6 +170,16 @@ app.get('/', function (req, res) {
   res.render('index', {
     title: 'hoem'
   });
+});
+
+app.error(function(err, req, res, next) {
+  // if(err instanceof UserLoadError) {
+  //   console.log('user load error');
+  //   res.redirect('/post');
+  // } else if ( err instanceof InternalServerError) {
+  //   //res.
+  // }
+  // next();
 });
 
 var client = dbox.createClient({
@@ -222,22 +246,17 @@ app.get('/project', function(req, res) {
   })
 });
 
-app.post('/project/create', validateProject, ensureFile, function(req, res) {
 
+// TODO see if dropbox login
+
+app.post('/project/create', validateProject, ensureFile, createProject, function(req, res) {
   
-  
-  // TODO see if dropbox login
-  // client.share
-  client.put('title.json', options, function(status, reply) {
-    
-  })
-  // 1. put file and get sharable link
-  // 2. create Project
-  // 3. push User.editing
-  
-  // res.render('', {
-  //   
-  // });
+  // shared link url
+  // TODO - all user's link url
+  res.render('project_edit', {
+    title: 'project',
+    url: req.shares.url
+  });
 });
 
 function validateProject(req, res, next) {
@@ -270,16 +289,91 @@ function ensureFile(req, res, next) {
       oauth_token_secret : accessTokenSecret
     };
   
-  // client.put(fileName, _.extend({ overwrite: false}, options), function(status, reply) {
-  //   if(status == 200) {
-  //     client.share(fileName, options, function(status2, reply2) {
-  //       if(status2 == 200) {
-  //         url = reply2.url;
-  //         
-  //       }
-  //     });
-  //   }
+  async.waterfall([
+    // put file if there isn't
+    // TODO - how to do inital json
+    function(callback) {
+      client.put(fileName, '{}', _.extend({ overwrite: false}, options), function(status, reply) {
+        if(status == 200) {
+          callback(null);
+        } else {
+          callback(new Error(status), null);
+        }
+      });
+    },
+    function(callback) {
+      client.share(fileName, options, function(status, reply) {
+        if(status == 200) {
+          callback(null, reply);
+        } else {
+          callback(new Error(status), null);
+        }
+      });
+    }
+  ], function(err, result) {
+    if(err) {
+      console.log('error during dropbox access');
+      // TODO how to do
+      res.redirect('back');
+    } else {
+      req.shares = result;
+      next();
+    }
+  });
+}
+
+function createProject(req, res, next) {
+  // var ProjectSchema = new Schema({
+  //   title: { type: String, index: { unique : true }},
+  //   description: { type: String, required: true },
+  //   editors: [ EditorSchema ]
   // });
+  
+  // var EditorSchema = new Schema({
+  //   user: { type: ObjectId, ref: 'User' },
+  //   // shareable link
+  //   url: { type: String }
+  // });
+  var 
+    body = req.body,
+    userId = req.session.auth.user._id,
+    options = {
+      title: body.title,
+      description: body.description
+      editors: [{
+        user: userId,
+        url: req.shares.url
+      }]
+    };
+    console.log('options');
+    console.dir( options );
+  async.auto({
+    project: function(callback) {
+      var project = new Project(options);
+      project.save(callback);
+    },
+    user: function(callback) {
+      User.findById(userId, function(err, doc) {
+        if(doc) {
+          callback(null, doc);
+        } else {
+          callback((err || new Error('no such id: ' + userId) ), null);
+        }
+      });
+    },
+    updateUser: ['project', 'user', function(callback, result) {
+      var user = result.project.user;
+      user.editings.push(result.project._id);
+      user.save(callback);
+    }]
+  }, function(err, result) {
+    if(err) {
+      return next(err);//throw err
+    }
+    console.dir( result );
+    req.projectModel = result.project;
+    next();
+  });
 }
 
 app.get('/dropbox/gettext', function(req, res) {
