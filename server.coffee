@@ -8,6 +8,7 @@ RedisStore = require('connect-redis')(connect)
 _ = require 'underscore'
 util = require 'util'
 async = require 'async'
+stylus = require 'stylus'
 Schema = mongoose.Schema
 ObjectId = Schema.ObjectId
 log = console.log
@@ -16,10 +17,10 @@ dir = console.dir
 
 compile = (str, path) ->
   stylus(str)
-    .import __dirname + '/stylesheets/mixins'
-    .set 'filename', path
-    .set 'warn', true
-    .set 'compress', true
+    .import(__dirname + '/stylesheets/mixins')
+    .set('filename', path)
+    .set('warn', true)
+    .set('compress', true)
 
 mongoose.connect 'mongodb://localhost/mydb'
 
@@ -97,8 +98,11 @@ app.configure ->
     secret: 'keyboard cat'
   app.use everyauth.middleware()
   app.use express.methodOverride()
-  app.use (require 'stylus').middleware
-    src: __dirname + '/public'
+  # TODO - production version not compile each time
+  app.use stylus.middleware
+    src: __dirname
+    dest: __dirname + '/public'
+    compile: compile
   app.use app.router
   app.use express.static __dirname + '/public'
 
@@ -119,8 +123,8 @@ everyauth.helpExpress(app)
 app.get '/', (req, res) ->
   #log 'session'
   dir req.session
-  res.render 'index',
-    title: 'hoem'
+  res.render 'home',
+    title: 'home'
 
 ValidateError = (msg)->
   this.name = 'ValidateError'
