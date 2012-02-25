@@ -1,6 +1,33 @@
-!!!
-html
+!!! 5
+html.no-js
   head
     title= title
     link(rel='stylesheet', href='/stylesheets/home.css')
-  body!= body
+  body
+    div#wrapper
+      header.clearfix
+        h1
+          a(href='/', title='Test.com home') Test.com
+        nav
+          ul
+            li
+              a(id='nav-help', href='/help') Help
+            li
+              a(id='nav-search', href='/search') Search
+            li
+              a(id='nav-create-post', href='/post/new') Create new Project
+          - if (everyauth.loggedIn)
+            a#logout-button.login-button(href='/logout') Logout
+          - else
+            a#login-button.login-button(href='/login') Login
+      dic#message
+        - if ('undefined' !== typeof msg)
+          p= msg
+      div#content.clearfix!= body
+      footer.clearfix
+        span © 2011 test.com
+        ul          
+          li
+            a(id='footer-about', href="/about") About
+          li
+            a(id='footer-tos', href='/tos') Terms
